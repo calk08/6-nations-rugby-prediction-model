@@ -1,0 +1,62 @@
+name: Six Nations Data Ingestion
+
+on:
+  schedule:
+    # Saturday 23:00 UTC — after most match days
+    - cron: "0 23 * * 6"
+    # Monday 06:00 UTC — catch Sunday results & update forecasts
+    - cron: "0 6 * * 1"
+  workflow_dispatch: # allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ingestion pipeline
+        run: python -m data_pipeline.pipeline
+
+      - name: Commit updated database
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+          git add rugby.db
+          # Only commit if the DB file actually changed
+          if git diff --cached --quiet; then
+            echo "No database changes to commit."
+          else
+            git commit -m "chore: update rugby.db [automated ingestion]"
+            git push
+          fi
+
+      # ── Failure notification ──────────────────────────────────────────
+      # To add Slack/email notifications on failure, replace the echo
+      # below with a webhook call, for example:
+      #   curl -X POST -H 'Content-type: application/json' \
+      #     --data '{"text":"Six Nations pipeline failed!"}' \
+      #     ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Notify on failure
+        if: failure()
+        run: echo "Pipeline failed — add Slack or email webhook here"
